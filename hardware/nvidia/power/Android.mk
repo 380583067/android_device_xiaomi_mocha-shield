@@ -1,4 +1,4 @@
-# Copyright (C) 2019 The LineageOS Project
+# Copyright (C) 2015 The CyanogenMod Project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,56 +17,34 @@ ifeq ($(TARGET_POWERHAL_VARIANT),tegra)
 LOCAL_PATH := $(call my-dir)
 
 include $(CLEAR_VARS)
-LOCAL_MODULE := vendor.nvidia.hardware.power@1.0-service
-LOCAL_INIT_RC := vendor.nvidia.hardware.power@1.0-service.rc
 
-LOCAL_SHARED_LIBRARIES := \
-    libhardware \
-    libhidlbase \
-    libhidltransport \
-    liblog \
-    libcutils \
-    libutils \
-    libdl \
-    libexpat \
-    vendor.nvidia.hardware.power@1.0
+LOCAL_SRC_FILES := nvpowerhal.cpp timeoutpoker.cpp power.cpp powerhal_utils.cpp tegra_sata_hal.cpp
 
-LOCAL_SRC_FILES := \
-    service.cpp \
-    Power.cpp \
-    nvpowerhal.cpp \
-    timeoutpoker.cpp \
-    powerhal_parser.cpp \
-    powerhal_utils.cpp \
-    tegra_sata_hal.cpp
+# This is only for devices that can contain a sata hard drive, currently only foster
+ifneq ($(filter foster,$(TARGET_DEVICE)),)
+LOCAL_CFLAGS += -DENABLE_SATA_STANDBY_MODE
+endif
 
+# Any devices with a old interactive governor
+ifeq ($(TARGET_TEGRA_VERSION),t114)
+    LOCAL_CFLAGS += -DPOWER_MODE_LEGACY
+endif
+
+# Currently used only for T210 devices
 ifeq ($(TARGET_TEGRA_VERSION),t210)
-    LOCAL_SRC_FILES += power_floor_t210.cpp
-endif
-
-ifeq ($(TARGET_TEGRA_VERSION), $(filter $(TARGET_TEGRA_VERSION), ap20 t30 t114 t148))
-    LOCAL_CFLAGS += -DGPU_IS_LEGACY
-endif
-
-# T124+ uses set interactive. Revist if <= T114 is brought back
-LOCAL_CFLAGS += -DPOWER_MODE_SET_INTERACTIVE
-LOCAL_CFLAGS += -DTARGET_TEGRA_VERSION=$(TARGET_TEGRA_VERSION:t=)
-
-ifeq ($(TARGET_TEGRA_PHS),nvphs)
-    LOCAL_CFLAGS += -DUSE_NVPHS
-    LOCAL_SHARED_LIBRARIES += libnvphs
-endif
-
-ifeq ($(TARGET_TEGRA_POWER),lineage)
-    LOCAL_CFLAGS += -DLINEAGE_PROFILES
-    LOCAL_SHARED_LIBRARIES += \
-        vendor.lineage.power@1.0
+    LOCAL_CFLAGS += -DPOWER_MODE_SET_INTERACTIVE
 endif
 
 LOCAL_MODULE_RELATIVE_PATH := hw
+
+LOCAL_PROPRIETARY_MODULE := true
+
+LOCAL_SHARED_LIBRARIES := liblog libcutils libutils libdl
+
+LOCAL_MODULE := power.$(TARGET_BOARD_PLATFORM)
+
 LOCAL_MODULE_TAGS := optional
-LOCAL_VENDOR_MODULE := true
-LOCAL_MODULE_OWNER := nvidia
-include $(BUILD_EXECUTABLE)
+
+include $(BUILD_SHARED_LIBRARY)
 
 endif # TARGET_POWERHAL_VARIANT == tegra

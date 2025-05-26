@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2011-2013 NVIDIA Corporation.  All Rights Reserved.
- * Copyright (C) 2019 The LineageOS Project
  *
  * NVIDIA Corporation and its licensors retain all intellectual property and
  * proprietary rights in and to this software and related documentation.  Any
@@ -14,6 +13,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include <android/looper.h>
 #include <utils/threads.h>
 #include <utils/Errors.h>
 #include <utils/List.h>
@@ -33,20 +33,7 @@
 
 using namespace android;
 
-//ALooper defines
-enum {
-    ALOOPER_POLL_WAKE = -1,
-    ALOOPER_POLL_CALLBACK = -2,
-    ALOOPER_POLL_TIMEOUT = -3,
-    ALOOPER_POLL_ERROR = -4,
-};
-enum {
-    ALOOPER_EVENT_INPUT = 1 << 0,
-    ALOOPER_EVENT_OUTPUT = 1 << 1,
-    ALOOPER_EVENT_ERROR = 1 << 2,
-    ALOOPER_EVENT_HANGUP = 1 << 3,
-    ALOOPER_EVENT_INVALID = 1 << 4,
-};
+static int createConstraintCommand(char* command, int size, int priority, int max, int min);
 
 class TimeoutPoker {
 private:
@@ -214,7 +201,7 @@ private:
         KeyedVector<unsigned int, QueuedEvent*> mQueuedEvents;
 
         virtual void handleMessage(const Message& msg);
-        PokeHandler(Barrier* readyToRun);
+        PokeHandler(TimeoutPoker* poker, Barrier* readyToRun);
         int generateNewKey(void);
         void sendEventDelayed(nsecs_t delay, QueuedEvent* ev);
         int listenForHandleToCloseFd(int handle, int fd);
@@ -231,8 +218,10 @@ private:
         int openPmQosNode(const char* filename, int prioirity, int max, int min);
 
     private:
+        TimeoutPoker* mPoker;
         int mKey;
 
+        bool mSpamRefresh;
         mutable Mutex mEvLock;
     };
 

@@ -1,7 +1,8 @@
 /*
  * Copyright (C) 2012 The Android Open Source Project
- * Copyright (c) 2012-2017, NVIDIA CORPORATION.  All rights reserved.
- * Copyright (C) 2019 The LineageOS Project
+ * Copyright (c) 2012-2015, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (C) 2015 The CyanogenMod Project
+ * Copyright (C) 2017 The LineageOS Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,18 +27,27 @@
 #include "timeoutpoker.h"
 #include <semaphore.h>
 
-#include <vector>
-
-#include <vendor/nvidia/hardware/power/1.0/IPower.h>
-
-using ::vendor::nvidia::hardware::power::V1_0::ExtPowerHint;
-using ::vendor::nvidia::hardware::power::V1_0::NvCPLHintData;
-
 #define MAX_CHARS 32
+#define MAX_INPUT_DEV_COUNT 12
+#define MAX_USE_CASE_STRING_SIZE 80
+#define MAX_POWER_HINT_COUNT POWER_HINT_SET_PROFILE
 
+#define CAMERA_TARGET_FPS 30
+#define DEFAULT_MIN_ONLINE_CPUS     2
+#define DEFAULT_MAX_ONLINE_CPUS     0
+#define DEFAULT_FREQ                700
+
+#define CAMERA_TARGET_FPS 30
 #define POWER_CAP_PROP "persist.sys.NV_PBC_PWR_LIMIT"
+#define SLEEP_INTERVAL_SECS 1
+
+//sys node control entry
+#define SYS_NODE_PRISM_ENABLE           "/sys/devices/platform/host1x/tegradc.0/smartdimmer/enable"
+#define SYS_NODE_CPU0_MAX_FREQ          "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq"
 
 //PMQOS control entry
+#define PMQOS_MAX_ONLINE_CPUS           "/dev/max_online_cpus"
+#define PMQOS_MAX_CPU_FREQ              "/dev/cpu_freq_max"
 #define PMQOS_CONSTRAINT_CPU_FREQ       "/dev/constraint_cpu_freq"
 #define PMQOS_CONSTRAINT_GPU_FREQ       "/dev/constraint_gpu_freq"
 #define PMQOS_CONSTRAINT_ONLINE_CPUS    "/dev/constraint_online_cpus"
@@ -50,14 +60,30 @@ using ::vendor::nvidia::hardware::power::V1_0::NvCPLHintData;
 #define PM_QOS_BOOST_PRIORITY 35
 #define PM_QOS_APP_PROFILE_PRIORITY  40
 
-#define HARDWARE_TYPE_PROP "ro.hardware"
-
-#define POWER_HINT_MAX ExtPowerHint::FRAMERATE_DATA
-
 struct input_dev_map {
     int dev_id;
     const char* dev_name;
 };
+
+typedef enum camera_usecase {
+    CAMERA_STILL_PREVIEW = 0,
+    CAMERA_VIDEO_PREVIEW,
+    CAMERA_VIDEO_RECORD,
+    CAMERA_VIDEO_RECORD_HIGH_FPS,
+    CAMERA_USECASE_COUNT
+} camera_usecase_t;
+
+typedef struct camera_cap {
+    int min_online_cpus;
+    int max_online_cpus;
+    int freq;
+    int minFreq;
+    int minCpuHint;
+    int maxCpuHint;
+    int minGpuHint;
+    int maxGpuHint;
+    int fpsHint;
+} camera_cap_t;
 
 typedef struct interactive_data {
     const char *hispeed_freq;
@@ -69,45 +95,47 @@ typedef struct interactive_data {
     const char *go_hispeed_load;
 } interactive_data_t;
 
-typedef struct power_hint_data {
-    int min;
-    int max;
-    int time_ms;
-} power_hint_data_t;
-
-typedef struct cpu_cluster_data {
-    const char *pmqos_constraint_path;
-    const char *available_freqs_path;
-    int *available_frequencies;
-    int num_available_frequencies;
-    int fd_app_min_freq;
-    int fd_app_max_freq;
-    int fd_vsync_min_freq;
-
-    std::map<ExtPowerHint,power_hint_data_t> hints;
-} cpu_cluster_data_t;
+typedef int (*sendhints_fn_t)(uint32_t client_tag, ...);
+typedef void (*cancelhints_fn_t)(uint32_t usecase, uint32_t client_tag);
 
 struct powerhal_info {
     TimeoutPoker* mTimeoutPoker;
 
-    std::vector<cpu_cluster_data_t> cpu_clusters;
+    int *available_frequencies;
+    int num_available_frequencies;
+
+    /* Maximum LP CPU frequency */
+    int lp_max_frequency;
+
+    int interaction_boost_frequency;
+    int animation_boost_frequency;
+
+    /* maximum frequency for the current cpufreq policy */
+    int cpu0_max_frequency;
 
     bool ftrace_enable;
-    bool no_cpufreq_interactive;
-    bool no_sclk_boost;
+
+    /* Number of devices requesting Power HAL service */
+    int input_cnt;
 
     /* Holds input devices */
-    std::vector<struct input_dev_map> input_devs;
+    struct input_dev_map* input_devs;
 
     /* Time last hint was sent - in usec */
-    std::map<ExtPowerHint,uint64_t> hint_time;
-    std::map<ExtPowerHint,uint64_t> hint_interval;
+    uint64_t hint_time[MAX_POWER_HINT_COUNT];
+    uint64_t hint_interval[MAX_POWER_HINT_COUNT];
 
-    std::map<ExtPowerHint,power_hint_data_t> gpu_freq_hints;
-    std::map<ExtPowerHint,power_hint_data_t> emc_freq_hints;
-    std::map<ExtPowerHint,power_hint_data_t> online_cpu_hints;
+    /* waiting condvar regular hints thread */
+    pthread_cond_t wait_cond;
 
-    int boot_boost_time_ms;
+    /* waiting mutex regular hints thread */
+    pthread_mutex_t wait_mutex;
+
+    /* regular hints thread handle */
+    pthread_t regular_hints_thread;
+
+    /* regular hints thread handle */
+    bool exit_hints_thread;
 
     /* AppProfile defaults */
     struct {
@@ -126,11 +154,41 @@ struct powerhal_info {
 
     /* File descriptors used for hints and app profiles */
     struct {
+        int app_min_freq;
+        int app_max_freq;
         int app_max_online_cpus;
         int app_min_online_cpus;
         int app_max_gpu;
         int app_min_gpu;
+        int vsync_min_cpu;
     } fds;
+
+    /* Camera power hint struct*/
+    struct {
+        /* handle for dynamic loaded library */
+        void *handle;
+        /* File descriptor used to set GPU target FPS */
+        int fd_gpu;
+        /* File descriptor used to set CPU min frequency */
+        int fd_cpu_freq_min;
+        /* File descriptor used to set CPU max frequency */
+        int fd_cpu_freq_max;
+        /* File descriptor used to set min CPUs online */
+        int fd_min_online_cpus;
+        /* File descriptor used to set max CPUs online */
+        int fd_max_online_cpus;
+
+        int target_fps;
+
+        camera_cap_t *cam_cap;
+        int usecase_index;
+    } camera_power;
+
+    /* PHS hint function pointers. Loaded in runtime since powerhal can't
+     * depend on libphs in link time. */
+    void *libphs_handle;
+    sendhints_fn_t NvVaSendThroughputHints;
+    cancelhints_fn_t NvCancelThroughputHints;
 
     /* Switching CPU/EMC freq ratio based on display state */
     bool switch_cpu_emc_limit_enabled;
@@ -142,7 +200,7 @@ void common_power_open(struct powerhal_info *pInfo);
 /* Power management setup action at startup.
  * Such as to set default cpufreq parameters.
  */
-void common_power_init(struct powerhal_info *pInfo);
+void common_power_init(struct power_module *module, struct powerhal_info *pInfo);
 
 /* Power management action,
  * upon the system entering interactive state and ready for interaction,
@@ -150,13 +208,21 @@ void common_power_init(struct powerhal_info *pInfo);
  * OR
  * non-interactive state the system appears asleep, displayi/touch usually turned off.
 */
-void common_power_set_interactive(struct powerhal_info *pInfo, int on);
+void common_power_set_interactive(struct power_module *module,
+                                    struct powerhal_info *pInfo, int on);
 
 /* PowerHint called to pass hints on power requirements, which
  * may result in adjustment of power/performance parameters of the
  * cpufreq governor and other controls.
 */
-void common_power_hint(struct powerhal_info *pInfo, ExtPowerHint hint, const void *data);
+void common_power_hint(struct power_module *module, struct powerhal_info *pInfo,
+                            power_hint_t hint, void *data);
 
-void set_power_level_floor(int on);
+/*
+ * Initialize struct camera_power. Copy platform dependent CPU config to
+ * cam_cap in struct camera_power.
+ */
+void common_power_camera_init(struct powerhal_info *pInfo, camera_cap_t *cap);
+
 #endif  //COMMON_POWER_HAL_H
+
