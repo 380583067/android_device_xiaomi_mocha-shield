@@ -14,51 +14,50 @@
 # limitations under the License.
 #
 
-# Sets Android Go default values for properties specific
+# Sets Android Go default values for properties specific for mocha(A11)
 
-# Set lowram options and enable traced by default
+# Low RAM configuration
 PRODUCT_PROPERTY_OVERRIDES += \
-     ro.config.low_ram=true \
-     persist.traced.enable=1
+    ro.config.low_ram=true \
+    persist.traced.enable=1
 
+# LMK settings (less aggressive for 2GB RAM)
+PRODUCT_PROPERTY_OVERRIDES += \
+   ro.lmk.critical_upgrade=true \
+   ro.lmk.upgrade_pressure=55 \
+   ro.lmk.downgrade_pressure=75 \
+   ro.lmk.medium=850  \
+   ro.lmk.kill_heaviest_task=false \
+   ro.lmk.psi_complete_stall_ms=150 \
+   ro.statsd.enable=true
 
-# Speed profile services and wifi-service to reduce RAM and storage.
+# Heap sizes (adjusted for 2GB RAM)
+PRODUCT_PROPERTY_OVERRIDES += \
+   dalvik.vm.heapgrowthlimit=192m \
+   dalvik.vm.heapsize=512m \
+   dalvik.vm.madvise-random=true \
+   dalvik.vm.dex2oat-threads=2
+
+# Compiler and optimization settings
 PRODUCT_SYSTEM_SERVER_COMPILER_FILTER := speed-profile
+PRODUCT_ALWAYS_PREOPT_EXTRACTED_APK := true
+PRODUCT_PROPERTY_OVERRIDES += \
+    pm.dexopt.shared=quicken \
+    pm.dexopt.downgrade_after_inactive_days=7
 
-# Default heap sizes. Allow up to 256m for large heaps to make sure a single app
-# doesn't take all of the RAM.
-PRODUCT_PROPERTY_OVERRIDES += dalvik.vm.heapgrowthlimit=128m
-PRODUCT_PROPERTY_OVERRIDES += dalvik.vm.heapsize=360m
+# Boot image profile
+PRODUCT_USE_PROFILE_FOR_BOOT_IMAGE := true
+PRODUCT_DEX_PREOPT_BOOT_IMAGE_PROFILE_LOCATION := frameworks/base/config/boot-image-profile.txt
 
+# Network stack
+PRODUCT_PACKAGES += InProcessNetworkStack
 
-# Strip the local variable table and the local variable type table to reduce
-# the size of the system image. This has no bearing on stack traces, but will
-# leave less information available via JDWP.
+# Minimize debug info
 PRODUCT_MINIMIZE_JAVA_DEBUG_INFO := true
+PRODUCT_ART_TARGET_INCLUDE_DEBUG_BUILD := false
 
-# Set lowram options
 PRODUCT_PROPERTY_OVERRIDES += \
-     ro.lmk.critical_upgrade=true \
-     ro.lmk.upgrade_pressure=40 \
-     ro.lmk.downgrade_pressure=60 \
-     ro.lmk.kill_heaviest_task=false \
-     ro.statsd.enable=true
-
-# set threshold to filter unused apps
-PRODUCT_PROPERTY_OVERRIDES += \
-     pm.dexopt.downgrade_after_inactive_days=10
-
-# Default heap sizes. Allow up to 256m for large heaps to make sure a single app
-# doesn't take all of the RAM.
-PRODUCT_PROPERTY_OVERRIDES += \
-    dalvik.vm.heapgrowthlimit=128m
-    dalvik.vm.heapsize=256m
-
-# 512MB specific properties.
-
-# lmkd can kill more now.
-PRODUCT_PROPERTY_OVERRIDES += \
-     ro.lmk.medium=700
+    ro.storage_manager.enabled=true
 
 # madvise random in ART to reduce page cache thrashing.
 PRODUCT_PROPERTY_OVERRIDES += \
