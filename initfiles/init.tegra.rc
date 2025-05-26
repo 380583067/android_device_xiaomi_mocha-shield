@@ -1,53 +1,54 @@
-#Copyright (c) 2011-2014 NVIDIA Corporation.  All Rights Reserved.
+# Copyright (c) 2011-2014 NVIDIA Corporation.  All Rights Reserved.
 #
-#NVIDIA Corporation and its licensors retain all intellectual property and
-#proprietary rights in and to this software and related documentation.  Any
-#use, reproduction, disclosure or distribution of this software and related
-#documentation without an express license agreement from NVIDIA Corporation
-#is strictly prohibited.
+# NVIDIA Corporation and its licensors retain all intellectual property and
+# proprietary rights in and to this software and related documentation.  Any
+# use, reproduction, disclosure or distribution of this software and related
+# documentation without an express license agreement from NVIDIA Corporation
+# is strictly prohibited.
 
-import init.comms.rc
+import /vendor/etc/init/hw/init.comms.rc
 
 on early-init
     mount debugfs debugfs /sys/kernel/debug mode=0755
-    
-# make trace_marker everyone writable
-    chmod 222 /sys/kernel/debug/tracing/trace_marker
+    mount tmpfs cgroup /sys/fs/cgroup mode=0755,uid=0,gid=0
+    mkdir /sys/fs/cgroup/memory 0755 root system
+    mount cgroup none /sys/fs/cgroup/memory memory
 
 on init
-    export LD_PRELOAD "libshim_zw.so"
-
     mkdir /mnt/media_rw/sdcard1 0700 media_rw media_rw
+    mkdir /storage/sdcard1 0700 root sdcard_r
     
     # Support legacy paths
     symlink /sdcard /mnt/sdcard
-    symlink /sdcard /storage/sdcard0
+    #symlink /sdcard /storage/sdcard0
 
     # create directory for mounting usb drives
-    mkdir /mnt/media_rw/usbdrive 0700 media_rw media_rw
-    mkdir /storage/usbdrive 0700 root root
-    symlink /mnt/media_rw/usbdrive /storage/usbdrive
-    symlink /mnt/media_rw/usbdrive /usbdrive
+    # mkdir /mnt/media_rw/usbdrive 0700 media_rw media_rw
+    # mkdir /storage/usbdrive 0700 root root
+    # symlink /mnt/media_rw/usbdrive /storage/usbdrive
+    # symlink /mnt/media_rw/usbdrive /usbdrive
 
     # create directory for mounting calibration partition
-    mkdir /mnt/factory 0666 system system
-    
-    mkdir /factory 0666 system system
-    mkdir /factory/wifi_config 0666 system system
+    mkdir /mnt/vendor/factory 0666 system system
+    mkdir /mnt/vendor/wifi_config 0666 system system
 
     # create directory for mounting user calibration partition
     mkdir /mnt/usercalib 0771 system system
 
-    start watchdogd
+    #radio.noril true  
+    setprop ro.radio.noril true
 
 on fs
-# mount console ramooops
-   mount pstore pstore /sys/fs/pstore
+    # mount console ramooops
+    mount pstore pstore /sys/fs/pstore
 
 on post-fs-data
     # We chown/chmod /mnt/usercalib again so because mount is run as root + defaults
     chown system system /usercalib
     chmod 0771 /usercalib
+
+    chown system system /mnt/vendor/wifi_config
+    chmod 0666 /mnt/vendor/wifi_config
 
     # create the lost+found directories, so as to enforce our permissions
     mkdir /usercalib/lost+found 0770 root root
@@ -55,19 +56,24 @@ on post-fs-data
     # Set SELinux security contexts on upgrade or policy update.
     restorecon_recursive /usercalib
 
-    mkdir /data/misc/dhcp 0770 dhcp dhcp
-    mkdir /data/misc/hwc 0771 system graphics
-    mkdir /data/nvcam 0700 media camera
-    chown dhcp dhcp /data/misc/dhcp
+    mkdir /data/vendor/dhcp 0770 dhcp dhcp
+    
+    mkdir /data/vendor/hwc 0771 system graphics
+    
+    mkdir /data/vendor/mediadrm 0770 mediadrm mediadrm
+
+    mkdir /data/vendor/nvcam 0700 media camera
+
+    chown dhcp dhcp /data/vendor/dhcp
 
     # Set indication (checked by vold) that we have finished this action
     setprop vold.post_fs_data_done 1
 
     # create directory for mediaserver EGL blob cache
-    mkdir /data/misc/mediaserver 0770 media media
+    mkdir /data/vendor/mediaserver 0770 media media
 
 # Set up HDCP
-import init.hdcp.rc
+import /vendor/etc/init/hw/init.hdcp.rc
 
 on boot
 
@@ -77,24 +83,24 @@ on boot
 # charger
     chown system system /sys/devices/platform/7000c400.i2c/i2c-1/1-006b/disabled_by_user
 
-#dt2w
+    # dt2w
     chown system system /sys/devices/platform/7000c700.i2c/i2c-3/3-004a/wakeup_mode
     chown system system /sys/devices/platform/7000c700.i2c/i2c-3/3-0020/input/input0/wake_gesture
     chown system system /sys/devices/platform/7000c700.i2c/i2c-3/3-0020/input/input3/wake_gesture
 
-## cmhw permissions
-# key disabler
+    ## cmhw permissions
+    # key disabler
     chown system system /sys/devices/platform/7000c700.i2c/i2c-3/3-004a/enable_keys
     chown system system /sys/devices/platform/7000c700.i2c/i2c-3/3-0020/input/input0/0dbutton
     chown system system /sys/devices/platform/7000c700.i2c/i2c-3/3-0020/input/input3/0dbutton
 
-# vibrator intensity
+    # vibrator intensity
     chown system system /sys/vibrator/pwmvalue
 
-# CMU
+    # CMU
     chown system system /sys/devices/platform/host1x/tegradc.0/cmu_enable
 
-# power
+    # power
     chown system system /sys/kernel/tegra_cap/core_cap_level
     chown system system /sys/kernel/tegra_cap/core_cap_state
     chown system system /sys/kernel/tegra_volt_cap/cpu_volt
@@ -102,7 +108,7 @@ on boot
     chown system system /sys/module/cpu_tegra/parameters/cpu_user_cap
     chown system system /sys/devices/platform/host1x/gk20a.0/enable_3d_scaling
 
-# audio
+    # audio
     chmod 0664 /sys/power/suspend/mode
     chown system audio /sys/power/suspend/mode
 
@@ -162,7 +168,7 @@ on boot
     chown system system /sys/bus/i2c/drivers/lp5521/0-0032/run_engine
 
 # TLK storage service
-import init.tlk.rc
+import /vendor/etc/init/hw/init.tlk.rc
 
 on property:ro.debuggable=1
     # EMC debug interface
@@ -220,9 +226,21 @@ service bugreport /system/bin/dumpstate -d -p -B -o /data/data/com.android.shell
     keycodes 116 115 114
 
 # unified scaling setup
-import init.ussrd.rc
+import /vendor/etc/init/hw/init.ussrd.rc
 
-# Thie yields each tegra wdt expiration to be at 30 secs and fourth expiration for reboot at 120 secs.
-service watchdogd /sbin/watchdogd 10 110
-    class core
-    seclabel u:r:watchdogd:s0
+# Logcat in cache folder while is in bootanimation
+service logger /system/bin/logcat -b all -D -f /cache/boot_log.txt
+    class main
+    user root
+    group root system
+    disabled
+    oneshot
+
+on post-fs-data
+    # Clear existing log and start the service
+    rm /cache/boot_log.txt
+    start logger
+
+on property:sys.boot_completed=1
+    # Stop the logger service
+    stop logger
